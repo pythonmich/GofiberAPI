@@ -6,6 +6,7 @@ migrate-up:
 
 migrate-down:
 	migrate -path database/migrations -database ${PQURL} -verbose down
+
 migrateDirtyVersion:
 	migrate -path database/migrations -database ${PQURL} force 1
 

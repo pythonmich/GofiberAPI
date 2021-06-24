@@ -1,44 +1,59 @@
 package database
 
 import (
-	"FiberFinanceAPI/util"
+	"FiberFinanceAPI/utils"
 	"database/sql"
 	"errors"
+	logs "github.com/sirupsen/logrus"
+	"reflect"
 	"time"
 )
 
 
-// Connect connects to our database
-func Connect(config util.Config) (*sql.DB,error) {
+// connect connects to our database
+func connect(config utils.Config) (*sql.DB,error) {
+	logs.WithField("func", "database/connect.go -> Connect()").Info()
+	logs.WithFields(logs.Fields{
+		"driver_name": config.DBName,
+		"DBDriver": config.DBDriver,
+	}).Info()
 	conn, err := sql.Open(config.DBName, config.DBDriver); if err != nil{
+		logs.WithError(err).Warn("cannot connect to database")
 		return nil, err
 	}
-
-	defer func(c *sql.DB) {
-		err = c.Close()
-	}(conn)
+	logs.Info("connected to database")
 
 	conn.SetMaxOpenConns(12)
 	// Check if database is running
 	if err = waitForDB(conn, config); err != nil{
-		return nil, err
+		return conn, err
 	}
 	return conn, err
 }
-
+func NewConnection(config utils.Config) (*sql.DB,error) {
+	return connect(config)
+}
 // waitForDB checks is if the database is ready for connections or is up alive
-func waitForDB(conn *sql.DB, config util.Config) error {
+func waitForDB(conn *sql.DB, config utils.Config) error {
+	logs.WithField("func", "database/connect.go -> waitForDB()").Info()
+	logs.WithFields(logs.Fields{
+		"conn": conn == nil,
+		"timeout": config.DBTimeout,
+		"type": reflect.TypeOf(config.DBTimeout),
+	}).Info()
 	ready := make(chan struct{})
 
 	go func() {
 		for {
 			if err := conn.Ping(); err != nil{
+				logs.WithError(err).Warn(err.Error())
 				close(ready)
 				return
 			}
 			time.Sleep(100*time.Millisecond)
 		}
 	}()
+
 	select {
 	case <-ready:
 		return nil

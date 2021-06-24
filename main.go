@@ -3,7 +3,8 @@ package main
 import (
 	"FiberFinanceAPI/api"
 	"FiberFinanceAPI/database"
-	"FiberFinanceAPI/util"
+	db "FiberFinanceAPI/database/sqlc"
+	"FiberFinanceAPI/utils"
 	_ "github.com/lib/pq"
 	logs "github.com/sirupsen/logrus"
 	"os"
@@ -16,20 +17,27 @@ func init()  {
 	logs.SetLevel(logs.DebugLevel)
 }
 func main() {
-	config, err := util.LoadConfig("."); if err != nil{
+	config, err := utils.LoadConfig("."); if err != nil{
 		logs.WithError(err).Fatal("unable to load config file")
 	}
-
 	logs.Debug("Connecting to database")
 
-	conn, err := database.Connect(config); if err != nil{
-		logs.WithError(err).Fatal("unable to close database")
+	conn, err := database.NewConnection(config); if err != nil{
+		logs.WithError(err).Warn("unable to connect database")
 	}
 
-	logs.WithField("version", util.GetVersion(config)).Debug("Starting server")
-	logs.Debug("Connecting to server")
+	defer func() {
+		err = conn.Close(); if err != nil {
+			logs.WithError(err).Warn("unable to close connection to database")
+		}
+	}()
 
-	server ,err := api.NewServer(config, conn, logs.New()); if err != nil{
+	logs.WithField("version", utils.GetVersion(config)).Debug("Starting server")
+	logs.Debug("Connecting to server")
+	// store returns an new Repo interface that takes in our conn to ensure it implements our queries interface
+	store := db.NewRepo(conn)
+
+	server ,err := api.NewServer(config, store); if err != nil{
 		logs.WithError(err).Fatal("unable to start server")
 	}
 	logs.Debug("Running server")
