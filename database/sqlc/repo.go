@@ -1,6 +1,9 @@
 package database
 
-import "database/sql"
+import (
+	"FiberFinanceAPI/utils"
+	"database/sql"
+)
 
 type Repo interface {
 	QueryInterface
@@ -11,11 +14,9 @@ type SQLRepo struct {
 	db *sql.DB
 }
 
-func NewRepo(db *sql.DB) Repo {
+func NewRepo(db *sql.DB, log *utils.StandardLogger) Repo {
 	return SQLRepo{
-		Queries: NewQuery(db),
+		Queries: NewQuery(db, log),
 		db:      db,
 	}
 }
-
-

@@ -6,14 +6,16 @@ import (
 	"github.com/sirupsen/logrus"
 	"net/http"
 )
+
 // serverVersion represents the current server version
 type serverVersion struct {
 	Version string `json:"version"`
 }
+
 // API route to return our API version
 // it will return the version when the server starts which can be used if necessary
 func (server *Server) version(ctx *fiber.Ctx) error {
-	version :=	serverVersion{Version: utils.GetVersion(server.config)}
-	server.logs.WithFields(logrus.Fields{"version":version.Version}).Info("version response")
+	version := serverVersion{Version: utils.GetVersion(server.config)}
+	server.logs.WithFields(logrus.Fields{"version": version.Version}).Info("version response")
 	return ctx.Status(http.StatusOK).JSON(version)
 }
