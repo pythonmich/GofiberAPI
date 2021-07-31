@@ -4,11 +4,11 @@ import "time"
 
 // Maker is an interface for managing tokens to create and verify the TokenAccess created
 type Maker interface {
-	// AccessToken  create a JWT Access Token and signs its before being issued to the user
+	// CreateAccessToken  create a JWT Access Token and signs its before being issued to the user
 	CreateAccessToken(userID string, duration time.Duration) (string, error)
 	// VerifyAccessToken verifies the issued TokenAccess and returns the AccessPayload
 	VerifyAccessToken(token string) (*AccessPayload, error)
-	// RefreshToken refreshes our token when it expires
+	// CreateRefreshToken refreshes our token when it expires
 	CreateRefreshToken(userID string, refreshDuration time.Duration) (string, error)
 	// AccessTokenExpiresAt returns the period in which an access token expires at for our TokenAccess
 	AccessTokenExpiresAt(token string) (int64, error)

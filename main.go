@@ -2,7 +2,7 @@ package main
 
 import (
 	"FiberFinanceAPI/api"
-	"FiberFinanceAPI/database"
+	dbConn "FiberFinanceAPI/database"
 	db "FiberFinanceAPI/database/sqlc"
 	"FiberFinanceAPI/utils"
 	_ "github.com/lib/pq"
@@ -15,8 +15,9 @@ func main() {
 		logs.WithError(err).Fatal("unable to load config file")
 	}
 	logs.Debug("Connecting to database")
+	newConn := dbConn.NewConn(config, logs)
 
-	conn, err := database.NewConnection(config, logs)
+	conn, err := newConn.Connect()
 	if err != nil {
 		logs.WithError(err).Warn("unable to connect database")
 	}
@@ -31,7 +32,7 @@ func main() {
 	logs.WithField("version", utils.GetVersion(config)).Debug("Starting server")
 	logs.Debug("Connecting to server")
 
-	// store returns an new Repo interface that takes in our conn to ensure it implements our queries interface
+	// store returns an new Repo interface that takes in our newConn to ensure it implements our queries interface
 	store := db.NewRepo(conn, logs)
 
 	server, err := api.NewServer(config, logs, store)

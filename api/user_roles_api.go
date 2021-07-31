@@ -1,7 +1,7 @@
 package api
 
 import (
-	"FiberFinanceAPI/auth"
+	model "FiberFinanceAPI/database/models"
 	db "FiberFinanceAPI/database/sqlc"
 	"database/sql"
 	"errors"
@@ -13,124 +13,114 @@ import (
 )
 
 type roleRequest struct {
-	db.UserRole
+	model.UserRole
 }
 
-func (server *Server) grantRole(ctx *fiber.Ctx) error {
-	server.logs.WithField("func", "users_role_api.go -> grantRole()").Debug()
+var roleNotFound = errors.New("user does not have any role(s)")
+
+func (s *Server) grantRole(ctx *fiber.Ctx) error {
+	s.logs.WithField("func", "users_role_api.go -> grantRole()").Debug()
 	var req roleRequest
 	userID := ctx.Params("userID")
 	if userID == "" {
-		server.logs.WithField("userId", "not provided").Debug()
+		s.logs.WithField("userID", "not provided").Debug()
 		status = http.StatusBadRequest
 		return ctx.Status(status).JSON(errorResponse(status, errors.New("userID not provided")))
 	}
-	authPayload := ctx.Locals(authorizationPayloadKey).(*auth.AccessPayload)
-	if authPayload.SUB != userID {
-		err := errors.New("id does not match")
-		status = http.StatusUnauthorized
-		return ctx.Status(status).JSON(errorResponse(status, err))
-	}
+
 	if err := ctx.BodyParser(&req); err != nil {
-		server.logs.WithError(err).Warn("cannot decode parameters")
-		status = http.StatusBadRequest
+		s.logs.WithError(err).Warn("cannot decode parameters")
+		status = http.StatusUnprocessableEntity
 		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
-	if errs := validateStruct(&req, server.logs); len(errs) > 0 {
-		server.logs.Warn("request data is invalid")
+	if errs := s.validate.validateRequests(&req); len(errs) > 0 {
+		s.logs.Warn("request data is invalid")
 		status = http.StatusBadRequest
-		return ctx.Status(status).JSON(validateResponse(errs, server.logs))
+		return ctx.Status(status).JSON(errs)
 	}
 
 	args := db.RoleParams{
-		UserID: db.UserID(userID),
+		UserID: model.UserID(userID),
 		Role:   req.Role,
 	}
-	role, err := server.repo.GrantRole(ctx.Context(), args)
+	role, err := s.repo.GrantRole(ctx.Context(), args)
 	if err != nil {
 		if pqErr, ok := err.(*pq.Error); ok {
-			server.logs.WithField(string(pqErr.Code), pqErr.Code.Name()).Debug("postgres codes")
+			s.logs.WithField(string(pqErr.Code), pqErr.Code.Name()).Debug("postgres error codes")
 			switch pqErr.Code.Name() {
 			case "unique_violation":
 				status = http.StatusForbidden
 				return ctx.Status(status).JSON(errorResponse(status, errors.New("role already allocated to user")))
 			}
 		}
-		server.logs.WithError(err).Warn()
+		s.logs.WithError(err).Warn()
 		status = http.StatusInternalServerError
 		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
 
-	server.logs.WithField("message", "successful").Debug(fmt.Sprintf("role granted for user %s", role.UserID))
+	s.logs.WithField("message", "successful").Debug(fmt.Sprintf("role granted for user %s", role.UserID))
 	return ctx.Status(http.StatusCreated).JSON(role)
 }
 
-func (server *Server) revokeRole(ctx *fiber.Ctx) error {
-	server.logs.WithField("func", "users_role_api.go -> revokeRole()").Debug()
+func (s *Server) revokeRole(ctx *fiber.Ctx) error {
+	s.logs.WithField("func", "users_role_api.go -> revokeRole()").Debug()
 	var req roleRequest
 	userID := ctx.Params("userID")
 	if userID == "" {
-		server.logs.WithField("userId", "not provided").Debug()
+		s.logs.WithField("userID", "not provided").Debug()
 		status = http.StatusBadRequest
 		return ctx.Status(status).JSON(errorResponse(status, errors.New("userID not provided")))
 	}
-	authPayload := ctx.Locals(authorizationPayloadKey).(*auth.AccessPayload)
-	if authPayload.SUB != userID {
-		err := errors.New("id does not match")
-		status = http.StatusUnauthorized
-		return ctx.Status(status).JSON(errorResponse(status, err))
-	}
 	if err := ctx.BodyParser(&req); err != nil {
-		server.logs.WithError(err).Warn("cannot decode parameters")
-		status = http.StatusBadRequest
+		s.logs.WithError(err).Warn("cannot decode parameters")
+		status = http.StatusUnprocessableEntity
 		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
-	if errs := validateStruct(&req, server.logs); len(errs) > 0 {
-		server.logs.Warn("request data is invalid")
+	if errs := s.validate.validateRequests(&req); len(errs) > 0 {
+		s.logs.Warn("request data is invalid")
 		status = http.StatusBadRequest
-		return ctx.Status(status).JSON(validateResponse(errs, server.logs))
+		return ctx.Status(status).JSON(errs)
 	}
 
 	args := db.RoleParams{
-		UserID: db.UserID(userID),
+		UserID: model.UserID(userID),
 		Role:   req.Role,
 	}
-	err := server.repo.RevokeRole(ctx.Context(), args)
+	err := s.repo.RevokeRole(ctx.Context(), args)
 	if err != nil {
-		server.logs.WithError(err).Warn()
+		if errors.Is(err, sql.ErrNoRows) {
+			s.logs.WithError(err).Warn()
+			status = http.StatusNotFound
+			return ctx.Status(status).JSON(errorResponse(status, roleNotFound))
+		}
+		s.logs.WithError(err).Warn()
 		status = http.StatusInternalServerError
 		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
 	return ctx.Status(http.StatusOK).JSON(fiber.Map{"message": "role revoked successfully"})
 }
 
-func (server *Server) getUserRole(ctx *fiber.Ctx) error {
-	server.logs.WithField("func", "users_role_api.go -> getUserRole()").Debug()
+func (s *Server) getUserRole(ctx *fiber.Ctx) error {
+	s.logs.WithField("func", "users_role_api.go -> getUserRole()").Debug()
 	userID := ctx.Params("userID")
 	if userID == "" {
-		server.logs.WithField("userID", "not provided").Debug()
+		s.logs.WithField("userID", "not provided").Debug()
 		status = http.StatusBadRequest
 		return ctx.Status(status).JSON(errorResponse(status, errors.New("userID not provided")))
 	}
-	authPayload := ctx.Locals(authorizationPayloadKey).(*auth.AccessPayload)
-	if authPayload.SUB != userID {
-		err := errors.New("id does not match")
-		status = http.StatusUnauthorized
-		return ctx.Status(status).JSON(errorResponse(status, err))
-	}
 
-	role, err := server.repo.GetUserRoleByID(ctx.Context(), db.UserID(userID))
+	role, err := s.repo.GetUserRoleByID(ctx.Context(), model.UserID(userID))
 	if err != nil {
 		if err == sql.ErrNoRows {
-			server.logs.WithError(err).Warn()
+			s.logs.WithError(err).Warn()
 			status = http.StatusNotFound
-			return ctx.Status(status).JSON(errorResponse(status, errors.New("user does not have role")))
+			return ctx.Status(status).JSON(errorResponse(status, roleNotFound))
 		}
-		server.logs.WithError(err).Warn()
+		s.logs.WithError(err).Warn()
 		status = http.StatusInternalServerError
 		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
-	server.logs.WithField("message", "successful").Debug(fmt.Sprintf("role for user %s", role.UserID))
+	s.logs.WithField("message", "successful").Debug(fmt.Sprintf("role for user %s", role.UserID))
 	return ctx.Status(http.StatusOK).JSON(role)
 }
 
@@ -139,39 +129,42 @@ type listRoleRequest struct {
 	PageSize int32 `query:"page_size" validate:"required,min=5,max=10"`
 }
 
-func (server *Server) listRoles(ctx *fiber.Ctx) error {
-	server.logs.WithField("func", "users_role_api.go -> listRoles()").Debug()
+func (s *Server) listRoles(ctx *fiber.Ctx) error {
+	s.logs.WithField("func", "users_role_api.go -> listRoles()").Debug()
 	var req listRoleRequest
 	userID := ctx.Params("userID")
 	if userID == "" {
-		server.logs.WithField("userID", "not provided").Debug()
+		s.logs.WithField("userID", "not provided").Debug()
 		status = http.StatusBadRequest
 		return ctx.Status(status).JSON(errorResponse(status, errors.New("userID not provided")))
 	}
 	if err := ctx.QueryParser(&req); err != nil {
-		server.logs.WithError(err).Warn("cannot decode parameters")
-		status = http.StatusBadRequest
+		s.logs.WithError(err).Warn("cannot decode parameters")
+		status = http.StatusUnprocessableEntity
 		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
-	if errs := validateStruct(&req, server.logs); len(errs) > 0 {
-		server.logs.Warn("request data is invalid")
+	if errs := s.validate.validateRequests(&req); len(errs) > 0 {
+		s.logs.Warn("request data is invalid")
 		status = http.StatusBadRequest
-		return ctx.Status(status).JSON(validateResponse(errs, server.logs))
+		return ctx.Status(status).JSON(errs)
 	}
-	authPayload := ctx.Locals(authorizationPayloadKey).(*auth.AccessPayload)
-	server.logs.WithFields(logrus.Fields{"limit": req.PageSize, "offset": (req.PageID - 1) * req.PageSize}).Debug()
+	s.logs.WithFields(logrus.Fields{"limit": req.PageSize, "offset": (req.PageID - 1) * req.PageSize}).Debug()
 	args := db.ListUserRoleParams{
-		UserID: db.UserID(authPayload.SUB),
+		UserID: model.UserID(userID),
 		Limit:  req.PageSize,
 		Offset: (req.PageID - 1) * req.PageSize,
 	}
 
-	roles, err := server.repo.ListUsersByRole(ctx.Context(), args)
+	roles, err := s.repo.ListUsersByRole(ctx.Context(), args)
 	if err != nil {
-		server.logs.WithError(err).Warn()
+		s.logs.WithError(err).Warn()
 		status = http.StatusInternalServerError
-		return ctx.Status(status).JSON(err)
+		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
-	server.logs.Debug("roles successfully returned")
+	if len(roles) == 0 {
+		status = http.StatusNotFound
+		return ctx.Status(status).JSON(errorResponse(status, roleNotFound))
+	}
+	s.logs.Debug("roles successfully returned")
 	return ctx.Status(http.StatusOK).JSON(roles)
 }

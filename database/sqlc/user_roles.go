@@ -1,6 +1,7 @@
 package database
 
 import (
+	model "FiberFinanceAPI/database/models"
 	"context"
 )
 
@@ -11,14 +12,14 @@ RETURNING user_id, role, created_at
 `
 
 type RoleParams struct {
-	UserID UserID `json:"user_id"`
-	Role   Role   `json:"role"`
+	UserID model.UserID `json:"user_id"`
+	Role   model.Role   `json:"role"`
 }
 
-func (q *Queries) GrantRole(ctx context.Context, args RoleParams) (UserRole, error) {
+func (q *Queries) GrantRole(ctx context.Context, args RoleParams) (model.UserRole, error) {
 	q.logs.WithField("func", "database/sqlc/user_roles.go -> GrantRole()").Debug()
 	row := q.db.QueryRowContext(ctx, grantRole, args.UserID, args.Role)
-	var userRole UserRole
+	var userRole model.UserRole
 	err := row.Scan(
 		&userRole.UserID,
 		&userRole.Role,
@@ -26,7 +27,7 @@ func (q *Queries) GrantRole(ctx context.Context, args RoleParams) (UserRole, err
 	)
 	if err != nil {
 		q.logs.WithError(err).Warn()
-		return UserRole{}, err
+		return model.UserRole{}, err
 	}
 	return userRole, nil
 }
@@ -39,12 +40,12 @@ AND role = $2
 
 func (q *Queries) RevokeRole(ctx context.Context, args RoleParams) error {
 	q.logs.WithField("func", "database/sqlc/user_roles.go -> RevokeRole()").Debug()
-	_, err := q.db.ExecContext(ctx, revokeRole, args.UserID, args.Role)
+	_, err := q.GetUserRoleByID(ctx, args.UserID)
 	if err != nil {
-		q.logs.WithError(err).Warn()
 		return err
 	}
-	return nil
+	_, err = q.db.ExecContext(ctx, revokeRole, args.UserID, args.Role)
+	return err
 }
 
 const getUserRoleByID = `--name: GetUserRoleByID :one
@@ -53,25 +54,25 @@ WHERE user_id = $1
 LIMIT 1
 `
 
-func (q Queries) GetUserRoleByID(ctx context.Context, id UserID) (UserRole, error) {
+func (q Queries) GetUserRoleByID(ctx context.Context, id model.UserID) (model.UserRole, error) {
 	q.logs.WithField("func", "database/sqlc/user_roles.go -> GetUserRoleByID()").Debug()
 	row := q.db.QueryRowContext(ctx, getUserRoleByID, id)
-	var userRole UserRole
+	var userRole model.UserRole
 	err := row.Scan(
 		&userRole.Role,
 		&userRole.CreatedAt,
 	)
 	if err != nil {
 		q.logs.WithError(err).Warn()
-		return UserRole{}, err
+		return model.UserRole{}, err
 	}
 	return userRole, nil
 }
 
 type ListUserRoleParams struct {
-	UserID UserID `json:"user_id"`
-	Limit  int32  `json:"limit"`
-	Offset int32  `json:"offset"`
+	UserID model.UserID `json:"user_id"`
+	Limit  int32        `json:"limit"`
+	Offset int32        `json:"offset"`
 }
 
 const listUserByRole = `--name: ListUsersByRole :many
@@ -81,7 +82,7 @@ LIMIT $2
 OFFSET $3
 `
 
-func (q *Queries) ListUsersByRole(ctx context.Context, args ListUserRoleParams) ([]UserRole, error) {
+func (q *Queries) ListUsersByRole(ctx context.Context, args ListUserRoleParams) ([]model.UserRole, error) {
 	q.logs.WithField("func", "database/sqlc/user_roles.go -> ListUsersByRole()").Debug()
 
 	rows, err := q.db.QueryContext(ctx, listUserByRole, args.UserID, args.Limit, args.Offset)
@@ -98,18 +99,14 @@ func (q *Queries) ListUsersByRole(ctx context.Context, args ListUserRoleParams) 
 		}
 		q.logs.Debug("rows closed successfully")
 	}()
-	var userRoles []UserRole
+	var userRoles []model.UserRole
 	for rows.Next() {
-		var userRole UserRole
-		err := rows.Scan(
+		var userRole model.UserRole
+		err = rows.Scan(
 			&userRole.UserID,
 			&userRole.Role,
 			&userRole.CreatedAt,
 		)
-		if err != nil {
-			q.logs.WithError(err).Warn()
-			return nil, err
-		}
 		userRoles = append(userRoles, userRole)
 	}
 	q.logs.Debug("successful")

@@ -2,6 +2,7 @@ package api
 
 import (
 	"FiberFinanceAPI/auth"
+	model "FiberFinanceAPI/database/models"
 	db "FiberFinanceAPI/database/sqlc"
 	"database/sql"
 	"errors"
@@ -15,25 +16,26 @@ import (
 // refreshTokenRequest data user sends to server to refresh token
 type refreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" validate:"required"`
-	db.LoginSession
+	model.SessionDeviceID
 }
 
 // TODO: Store RefreshToken In redis in future
 //refreshToken to refresh our token
-func (server *Server) refreshToken(ctx *fiber.Ctx) error {
-	server.logs.WithField("func", "refresh_token_api.go -> refreshToken()").Debug()
+func (s *Server) refreshToken(ctx *fiber.Ctx) error {
+	s.logs.WithField("func", "refresh_token_api.go -> refreshToken()").Debug()
 	var req refreshTokenRequest
+
 	if err := ctx.BodyParser(&req); err != nil {
-		server.logs.WithError(err).Warn("cannot decode parameters")
+		s.logs.WithError(err).Warn("cannot decode parameters")
 		status = http.StatusBadRequest
 		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
-	if errs := validateStruct(&req, server.logs); len(errs) > 0 {
-		server.logs.Warn("invalid data provided")
+	if errs := s.validate.validateRequests(&req); len(errs) > 0 {
+		s.logs.Warn("request data is invalid")
 		status = http.StatusBadRequest
-		return ctx.Status(status).JSON(validateResponse(errs, server.logs))
+		return ctx.Status(status).JSON(errs)
 	}
-	server.logs.WithFields(logrus.Fields{
+	s.logs.WithFields(logrus.Fields{
 		"deviceID": req.DeviceID,
 	}).Debug()
 
@@ -45,52 +47,52 @@ func (server *Server) refreshToken(ctx *fiber.Ctx) error {
 		status = http.StatusBadRequest
 		return ctx.Status(status).JSON(errorResponse(status, errors.New("access token not expired")))
 	}
-	payload, err := server.token.VerifyRefreshToken(req.RefreshToken)
+	payload, err := s.token.VerifyRefreshToken(req.RefreshToken)
 	if err != nil {
-		// if the token has expired the user will need to re-login otherwise we will delete the old refresh token  and create a new pair
+		// if the token has expired the user will need to re-login otherwise we will update the old refresh token  and create a new pair
 		if errors.Is(err, auth.ErrExpiredToken) {
-			err = fmt.Errorf("refresh token for user %s is expired", payload.SUB)
-			server.logs.WithError(err).Warn(fmt.Errorf("refresh token for user %s is expired", payload.SUB))
+			refreshErr := fmt.Errorf("refresh token for user %s is expired", payload.SUB)
+			s.logs.WithError(err).Warn(refreshErr)
 			status = http.StatusUnauthorized
-			return ctx.Status(status).JSON(errorResponse(status, errors.New("token is expired login required")))
+			return ctx.Status(status).JSON(errorResponse(status, errors.New("refresh token is expired login required")))
 
 		}
-		server.logs.WithError(err).Warn("refresh token verification failed")
+		s.logs.WithError(err).Warn("refresh token verification failed")
 		status = http.StatusUnauthorized
 		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
 	args := db.GetSessionsParams{
-		UserID:       db.UserID(payload.SUB),
+		UserID:       model.UserID(payload.SUB),
 		DeviceID:     req.DeviceID,
 		RefreshToken: req.RefreshToken,
 	}
-	session, err := server.repo.GetSession(ctx.Context(), args)
+	session, err := s.repo.GetSession(ctx.Context(), args)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			server.logs.WithError(err).Warn(err)
+			s.logs.WithError(err).Warn(err)
 			status = http.StatusNotFound
 			return ctx.Status(status).JSON(errorResponse(status, errors.New("session not found")))
 		}
-		server.logs.WithError(err).Warn(err)
+		s.logs.WithError(err).Warn(err)
 		status = http.StatusInternalServerError
 		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
 	// verify if user still exists in our database
-	user, err := server.repo.GetUserByID(ctx.Context(), string(session.UserID))
+	user, err := s.repo.GetUserByID(ctx.Context(), session.UserID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			server.logs.WithError(err).Warn(err)
+			s.logs.WithError(err).Warn(err)
 			status = http.StatusNotFound
-			return ctx.Status(status).JSON(errorResponse(status, err))
+			return ctx.Status(status).JSON(errorResponse(status, userNotFound))
 		}
-		server.logs.WithError(err).Warn(err)
+		s.logs.WithError(err).Warn(err)
 		status = http.StatusInternalServerError
 		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
 
-	accessToken, exp, refreshToken, rexp, err := tokenCredentials(user, server)
+	accessToken, exp, refreshToken, rexp, err := s.tokenCredentials(user)
 	if err != nil {
-		server.logs.WithError(err).Warn(err.Error())
+		s.logs.WithError(err).Warn()
 		status = http.StatusInternalServerError
 		return ctx.Status(status).JSON(errorResponse(status, err))
 	}
@@ -102,8 +104,8 @@ func (server *Server) refreshToken(ctx *fiber.Ctx) error {
 		ExpiresAt:    rexp,
 	}
 
-	if err = server.repo.SaveRefreshToken(ctx.Context(), arg); err != nil {
-		server.logs.WithError(err).Warn("unable to save refresh token")
+	if err = s.repo.SaveRefreshToken(ctx.Context(), arg); err != nil {
+		s.logs.WithError(err).Warn("unable to save refresh token")
 		status = http.StatusBadRequest
 		return ctx.Status(status).JSON(err)
 	}
@@ -116,6 +118,6 @@ func (server *Server) refreshToken(ctx *fiber.Ctx) error {
 		},
 		User: user,
 	}
-	server.logs.WithField("user_id", user.ID).Debug("tokens generated successfully")
+	s.logs.WithField("user_id", user.ID).Debug("tokens generated successfully")
 	return ctx.Status(http.StatusOK).JSON(resp)
 }

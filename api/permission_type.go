@@ -2,7 +2,8 @@ package api
 
 import (
 	"FiberFinanceAPI/auth"
-	db "FiberFinanceAPI/database/sqlc"
+	model "FiberFinanceAPI/database/models"
+	"github.com/gofiber/fiber/v2"
 )
 
 type permissionType string
@@ -14,12 +15,15 @@ const (
 	member permissionType = "member"
 	// User is logged in and user id passed to api is the same
 	memberIsTarget permissionType = "memberIsTarget"
+
+	//	anonymous prospects can access the resource allowed for viewing in our server
+	prospect permissionType = "prospect"
 )
 
 // Admin
-var adminOnly = func(role *db.UserRole) bool {
+var adminOnly = func(role model.UserRole) bool {
 	switch role.Role {
-	case db.RoleAdmin:
+	case model.RoleAdmin:
 		return true
 	}
 	return false
@@ -32,12 +36,18 @@ var memberOnly = func(payload *auth.AccessPayload) bool {
 }
 
 // logged in user == target user
-var memberIsTargetOnly = func(userID db.UserID, payload *auth.AccessPayload) bool {
+var memberIsTargetOnly = func(ctx *fiber.Ctx, userID model.UserID, payload *auth.AccessPayload) bool {
 	if userID == "" || payload.SUB == "" {
 		return false
 	}
-	if userID != db.UserID(payload.SUB) {
+	if userID != model.UserID(payload.SUB) {
 		return false
 	}
+	// we are storing the userID in a context after it matches the above conditions and will be available to the request that require the value
+	ctx.Locals("userID", userID)
+	return true
+}
+
+var prospects = func() bool {
 	return true
 }

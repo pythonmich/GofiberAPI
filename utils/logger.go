@@ -5,8 +5,6 @@ import (
 	"os"
 )
 
-// TODO: Logger
-
 // StandardLogger enforces specific log formats
 type StandardLogger struct {
 	*logrus.Logger

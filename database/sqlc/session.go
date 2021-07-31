@@ -1,6 +1,7 @@
 package database
 
 import (
+	model "FiberFinanceAPI/database/models"
 	"context"
 )
 
@@ -16,10 +17,10 @@ VALUES ($1, $2, $3, $4)
 `
 
 type SaveRefreshTokenParams struct {
-	UserID       UserID   `json:"user_id"`
-	DeviceID     DeviceID `json:"device_id"`
-	RefreshToken string   `json:"refresh_token"`
-	ExpiresAt    int64    `json:"expires_at"`
+	UserID       model.UserID   `json:"user_id"`
+	DeviceID     model.DeviceID `json:"device_id"`
+	RefreshToken string         `json:"refresh_token"`
+	ExpiresAt    int64          `json:"expires_at"`
 }
 
 func (q *Queries) SaveRefreshToken(ctx context.Context, args SaveRefreshTokenParams) error {
@@ -33,9 +34,9 @@ func (q *Queries) SaveRefreshToken(ctx context.Context, args SaveRefreshTokenPar
 }
 
 type GetSessionsParams struct {
-	UserID       UserID   `json:"user_id"`
-	DeviceID     DeviceID `json:"device_id"`
-	RefreshToken string   `json:"refresh_token"`
+	UserID       model.UserID   `json:"user_id"`
+	DeviceID     model.DeviceID `json:"device_id"`
+	RefreshToken string         `json:"refresh_token"`
 }
 
 const getSession = `--name: GetSession :one
@@ -46,10 +47,10 @@ AND refresh_token = $3
 AND to_timestamp(expires_at) > now()
 LIMIT 1`
 
-func (q *Queries) GetSession(ctx context.Context, args GetSessionsParams) (Session, error) {
+func (q *Queries) GetSession(ctx context.Context, args GetSessionsParams) (model.Session, error) {
 	q.logs.WithField("func", "database/sqlc/session.go -> GetSession()").Debug()
 	row := q.db.QueryRowContext(ctx, getSession, args.UserID, args.DeviceID, args.RefreshToken)
-	var session Session
+	var session model.Session
 	err := row.Scan(
 		&session.UserID,
 		&session.DeviceID,
@@ -59,7 +60,7 @@ func (q *Queries) GetSession(ctx context.Context, args GetSessionsParams) (Sessi
 	)
 	if err != nil {
 		q.logs.WithError(err).Warn(err)
-		return Session{}, err
+		return model.Session{}, err
 	}
 	return session, err
 }

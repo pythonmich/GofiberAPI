@@ -9,50 +9,66 @@ import (
 	"time"
 )
 
-// connect connects to our database
-func connect(config utils.Config, logs *utils.StandardLogger) (*sql.DB, error) {
-	logs.WithField("func", "database/connect.go -> Connect()").Info()
-	logs.WithFields(logrus.Fields{
-		"driver_name": config.DBName,
-		"DBDriver":    config.DBDriver,
-	}).Debug()
-	conn, err := sql.Open(config.DBName, config.DBDriver)
-	if err != nil {
-		logs.WithError(err).Warn("cannot connect to database")
-		return nil, err
-	}
-
-	conn.SetMaxOpenConns(12)
-	// Check if database is running
-	if err = waitForDB(conn, config, logs); err != nil {
-		return nil, err
-	}
-	logs.Info("connected to database")
-	return conn, err
+type ConnInter interface {
+	Connect() (*sql.DB, error)
+	waitForDB() error
 }
-func NewConnection(config utils.Config, logs *utils.StandardLogger) (*sql.DB, error) {
-	logs.WithField("func", "database/connect.go -> Connect()").Info("creating new connection")
-	return connect(config, logs)
+
+type connect struct {
+	conn   *sql.DB
+	config utils.Config
+	logs   *utils.StandardLogger
+}
+
+// NewConn creates a new connect instance
+func NewConn(config utils.Config, logs *utils.StandardLogger) ConnInter {
+	logs.WithField("func", "database/connect.go -> NewConn()").Debug("creating new connect")
+	return &connect{
+		config: config,
+		logs:   logs,
+	}
+}
+
+// Connect connects to our database
+func (c *connect) Connect() (*sql.DB, error) {
+	c.logs.WithField("func", "database/connect.go -> Connect()").Debug()
+	c.logs.WithFields(logrus.Fields{
+		"driver_name": c.config.DBName,
+		"DBDriver":    c.config.DBDriver,
+	}).Debug()
+	conn, err := sql.Open(c.config.DBName, c.config.DBDriver)
+	if err != nil {
+		c.logs.WithError(err).Warn("cannot connect to database")
+		return nil, err
+	}
+	c.conn = conn
+	c.conn.SetMaxOpenConns(12)
+	// Check if database is running and ready for connect
+	if err = c.waitForDB(); err != nil {
+		return nil, err
+	}
+	c.logs.Info("connected to database")
+	return c.conn, err
 }
 
 // waitForDB checks is if the database is ready for connections or is up alive
-func waitForDB(conn *sql.DB, config utils.Config, logs *utils.StandardLogger) error {
-	logs.WithField("func", "database/connect.go -> waitForDB()").Info()
-	logs.WithFields(logrus.Fields{
-		"conn is null": conn == nil,
-		"timeout":      config.DBTimeout,
-		"type":         reflect.TypeOf(config.DBTimeout),
+func (c *connect) waitForDB() error {
+	c.logs.WithField("func", "database/connect.go -> waitForDB()").Debug()
+	c.logs.WithFields(logrus.Fields{
+		"connect is null": c.conn == nil,
+		"timeout":         c.config.DBTimeout,
+		"type":            reflect.TypeOf(c.config.DBTimeout),
 	}).Debug()
 	ready := make(chan struct{})
 
 	go func() {
 		for {
-			err := conn.Ping()
+			err := c.conn.Ping()
 			if err == nil {
 				close(ready)
 				return
 			}
-			logs.WithError(err).Fatal(err.Error())
+			c.logs.WithError(err).Fatal(err.Error())
 			time.Sleep(100 * time.Millisecond)
 		}
 	}()
@@ -60,7 +76,7 @@ func waitForDB(conn *sql.DB, config utils.Config, logs *utils.StandardLogger) er
 	select {
 	case <-ready:
 		return nil
-	case <-time.After(config.DBTimeout):
+	case <-time.After(c.config.DBTimeout):
 		return errors.New("database not ready")
 	}
 }
